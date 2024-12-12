@@ -105,6 +105,23 @@ def dosya_indir(dosya_url, dosya_yolu):
         print(f"İndirme başarısız: {dosya_url}, Hata: {e}")
         return False
 
+def saat_dilimi_donustur(tarih_str):
+    saat_dilimleri = {
+        "EST": "-0500",
+        "EDT": "-0400",
+        "CST": "-0600",
+        "CDT": "-0500",
+        "MST": "-0700",
+        "MDT": "-0600",
+        "PST": "-0800",
+        "PDT": "-0700"
+    }
+    for dilim, offset in saat_dilimleri.items():
+        if dilim in tarih_str:
+            return tarih_str.replace(dilim, offset)
+    return tarih_str
+
+
 # Podcast ses dosyalarının bağlantılarını, yayınlanma tarihlerini ve başlıklarını toplama
 audio_links = []
 publication_groups = defaultdict(list)
@@ -114,19 +131,32 @@ for item in root.findall(".//item"):
     pub_date = item.find("pubDate")
     title = item.find("title")
 
-    if enclosure is not None and enclosure.get("url") and pub_date is not None and title is not None:
-        audio_url = enclosure.get("url")
-        pub_date_str = pub_date.text
+    if enclosure is None or not enclosure.get("url"):
+        print("Ses dosyası bağlantısı bulunamadı.")
+        continue
+    if pub_date is None or not pub_date.text:
+        print("Yayınlanma tarihi bulunamadı, atlanıyor.")
+        continue
+    if title is None:
+        print("Başlık bulunamadı, atlanıyor.")
+        continue
 
-        try:
-            pub_date_parsed = datetime.strptime(pub_date_str, "%a, %d %b %Y %H:%M:%S %z")
-            pub_date_key = pub_date_parsed.strftime("%Y-%m-%d")
-            formatted_date = pub_date_parsed.strftime("%y.%m.%d")
-            formatted_time = pub_date_parsed.strftime("%H-%M-%S")  # Saat formatında ':' yerine '-' kullanıldı
-            episode_title = f"{formatted_date} {formatted_time} {format_baslik(title.text.strip())}"
-            publication_groups[pub_date_key].append([episode_title, audio_url, pub_date_parsed.strftime("%H:%M:%S")])
-        except ValueError:
-            print(f"Yayınlanma tarihi çözümlemede hata: {pub_date_str}")
+    pub_date_str = pub_date.text
+    pub_date_str = saat_dilimi_donustur(pub_date_str)  # Saat dilimini dönüştür
+
+    try:
+        pub_date_parsed = datetime.strptime(pub_date_str, "%a, %d %b %Y %H:%M:%S %z")
+    except ValueError:
+        print(f"Tarih formatı çözümlemede hata: {pub_date_str}")
+        continue
+
+    # Tarih formatını 2019.01.16 gibi ayarla
+    formatted_date = pub_date_parsed.strftime("%Y.%m.%d")
+    formatted_time = pub_date_parsed.strftime("%H-%M-%S")
+    episode_title = f"{formatted_date} {formatted_time} {format_baslik(title.text.strip())}"
+
+    publication_groups[formatted_date].append([episode_title, enclosure.get("url"), pub_date_parsed.strftime("%H:%M:%S")])
+
 
 # Tarih filtresi uygula
 if args.son is not None:
