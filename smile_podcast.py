@@ -17,7 +17,77 @@ parser.add_argument("--son", type=int, default=None, help="Son kaç ay içerisin
 parser.add_argument("-i", "--indir", action="store_true", help="Bölümleri indir.")
 parser.add_argument("-g", "--goster", action="store_true", help="Bölüm başlıklarını göster.")
 parser.add_argument("--klasor", type=str, default=None, help="İndirilecek dosyaların kaydedileceği klasör yolunu belirtin.")
+parser.add_argument("-e", type=int, choices=[0, 1, 2], default=0, 
+                    help="Başlık biçimi: 0 (sadece başlık), 1 (tarih ve başlık), 2 (tarih, saat ve başlık)")
 args = parser.parse_args()
+
+
+def dosya_adini_duzelt(dosya_adi):
+    # Dosya adlarında geçersiz karakterleri temizler
+    gecersiz_karakterler = '<>:"/\\|?*'
+    return ''.join(c for c in dosya_adi if c not in gecersiz_karakterler).split("  ")[0]
+
+# Saatleri değiştir (tersten sırala ve başlıklarda güncelle)
+def saatleri_degistir_ve_guncelle(audios):
+    if not audios:
+        return audios
+
+    # Yayınlanma saatlerini al ve ters sırada sırala
+    saatler = [audio[2] for audio in audios]
+    ters_saatler = saatler[::-1]
+
+    # Saatleri ve başlıkları güncelle
+    for idx, audio in enumerate(audios):
+        audio[2] = ters_saatler[idx]  # Saat güncelle
+        eski_baslik = audio[0].split(' ', 2)[2]  # Tarih ve eski saat dışında kalan başlık
+        if args.e == 2:
+            yeni_baslik = f"{audio[0].split(' ')[0]} {ters_saatler[idx].replace(':', '-')} {eski_baslik}"
+        elif args.e == 1:
+            yeni_baslik = f"{audio[0].split(' ')[0]} {eski_baslik}"
+        else:
+            yeni_baslik = eski_baslik
+        audio[0] = yeni_baslik  # Başlığı güncelle
+    return audios
+
+def turkce_capitalize(kelime):
+    if not kelime:
+        return kelime
+    # İlk harfi büyüt, geri kalanını küçük yap
+    ilk_harf = kelime[0].translate(upper_map)
+    geri_kalan = kelime[1:].translate(lower_map)
+    return ilk_harf + geri_kalan
+
+def format_baslik(baslik):
+    return " ".join([turkce_capitalize(kelime) for kelime in baslik.split()])
+
+def dosya_indir(dosya_url, dosya_yolu):
+    try:
+        r = requests.get(dosya_url, stream=True)
+        r.raise_for_status()
+        with open(dosya_yolu, 'wb') as f:
+            for chunk in r.iter_content(chunk_size=8192):
+                f.write(chunk)
+        print(f"İndirildi: {dosya_yolu}")
+        return True
+    except requests.exceptions.RequestException as e:
+        print(f"İndirme başarısız: {dosya_url}, Hata: {e}")
+        return False
+
+def saat_dilimi_donustur(tarih_str):
+    saat_dilimleri = {
+        "EST": "-0500",
+        "EDT": "-0400",
+        "CST": "-0600",
+        "CDT": "-0500",
+        "MST": "-0700",
+        "MDT": "-0600",
+        "PST": "-0800",
+        "PDT": "-0700"
+    }
+    for dilim, offset in saat_dilimleri.items():
+        if dilim in tarih_str:
+            return tarih_str.replace(dilim, offset)
+    return tarih_str
 
 
 # Kullanıcıdan bir bağlantı al
@@ -53,14 +123,17 @@ except ET.ParseError:
     print("XML içeriği çözümlemede hata.")
     exit()
 
+
 # Podcast program adını al
 program_adi = root.find(".//channel/title").text.strip()
 # Kullanıcı bir klasör belirtmişse onu kullan, yoksa varsayılan oluştur
-klasor_adi = args.klasor if args.klasor else f"PO - {program_adi}"
+temiz_program_adi = dosya_adini_duzelt(program_adi)
+klasor_adi = args.klasor if args.klasor else f"PO - {temiz_program_adi}"
 indirilenler_dosyasi = os.path.join(klasor_adi, "zaten_indirilenler.txt")
 
 # Klasör oluştur
 if args.indir and not os.path.exists(klasor_adi):
+    klasor_adi=dosya_adini_duzelt(klasor_adi)
     os.makedirs(klasor_adi)
 
 # Zaten indirilenleri yükle
@@ -76,51 +149,6 @@ ucase_table = ''.join(u'ABCÇDEFGĞHIİJKLMNOÖPRSŞTUÜVYZÎÛÂ')
 # Büyük/küçük harf dönüşüm haritaları
 lower_map = str.maketrans(ucase_table, lcase_table)
 upper_map = str.maketrans(lcase_table, ucase_table)
-
-def turkce_capitalize(kelime):
-    if not kelime:
-        return kelime
-    # İlk harfi büyüt, geri kalanını küçük yap
-    ilk_harf = kelime[0].translate(upper_map)
-    geri_kalan = kelime[1:].translate(lower_map)
-    return ilk_harf + geri_kalan
-
-def format_baslik(baslik):
-    return " ".join([turkce_capitalize(kelime) for kelime in baslik.split()])
-
-def dosya_adini_duzelt(dosya_adi):
-    # Dosya adlarında geçersiz karakterleri temizler
-    return "".join(c for c in dosya_adi if c.isalnum() or c in " .-_()").strip()
-
-def dosya_indir(dosya_url, dosya_yolu):
-    try:
-        r = requests.get(dosya_url, stream=True)
-        r.raise_for_status()
-        with open(dosya_yolu, 'wb') as f:
-            for chunk in r.iter_content(chunk_size=8192):
-                f.write(chunk)
-        print(f"İndirildi: {dosya_yolu}")
-        return True
-    except requests.exceptions.RequestException as e:
-        print(f"İndirme başarısız: {dosya_url}, Hata: {e}")
-        return False
-
-def saat_dilimi_donustur(tarih_str):
-    saat_dilimleri = {
-        "EST": "-0500",
-        "EDT": "-0400",
-        "CST": "-0600",
-        "CDT": "-0500",
-        "MST": "-0700",
-        "MDT": "-0600",
-        "PST": "-0800",
-        "PDT": "-0700"
-    }
-    for dilim, offset in saat_dilimleri.items():
-        if dilim in tarih_str:
-            return tarih_str.replace(dilim, offset)
-    return tarih_str
-
 
 # Podcast ses dosyalarının bağlantılarını, yayınlanma tarihlerini ve başlıklarını toplama
 audio_links = []
@@ -164,25 +192,10 @@ if args.son is not None:
     publication_groups = {
         date: audios
         for date, audios in publication_groups.items()
-        if datetime.strptime(date, "%Y-%m-%d") >= tarih_limiti
+        if datetime.strptime(date, "%Y.%m.%d") >= tarih_limiti
     }
 
-# Saatleri değiştir (tersten sırala ve başlıklarda güncelle)
-def saatleri_degistir_ve_guncelle(audios):
-    if not audios:
-        return audios
 
-    # Yayınlanma saatlerini al ve ters sırada sırala
-    saatler = [audio[2] for audio in audios]
-    ters_saatler = saatler[::-1]
-
-    # Saatleri ve başlıkları güncelle
-    for idx, audio in enumerate(audios):
-        audio[2] = ters_saatler[idx]  # Saat güncelle
-        eski_baslik = audio[0].split(' ', 2)[2]  # Tarih ve eski saat dışında kalan başlık
-        yeni_baslik = f"{audio[0].split(' ')[0]} {ters_saatler[idx].replace(':', '-')} {eski_baslik}"
-        audio[0] = yeni_baslik  # Başlığı güncelle
-    return audios
 
 if publication_groups:
     print("Yayınlanma tarihlerine göre gruplandırılmış ses dosyaları:")
