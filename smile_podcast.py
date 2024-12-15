@@ -4,6 +4,9 @@ from collections import defaultdict
 from datetime import datetime, timedelta
 import argparse
 import os
+import sys
+
+sys.stdout.reconfigure(encoding='utf-8')
 
 class CustomArgumentParser(argparse.ArgumentParser):
     def error(self, message):
